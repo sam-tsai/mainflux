@@ -346,6 +346,83 @@ The most of the notifications received from the Adapter are non-confirmable. By 
 
 CoAP Adapter sends these notifications every 12 hours. To configure this period, please check [adapter documentation](../coap/README.md) If the client is no longer interested in receiving notifications, the second scenario described above can be used to unsubscribe
 
+### LoRa
+ 
+ Before to run the Mainflux lora-adapter you must install and run a [LoRa Server](https://www.loraserver.io/loraserver/overview). Execute the following command from LoRa Server project root: 
+ 
+ ```bash
+ go get github.com/brocaar/loraserver-docker
+ ```
+ 
+ Once everything is installed, execute the following command from the LoRa Server project root:
+ 
+ ```bash
+ docker-compose up
+ 
+ ```
+ 
+ The Mainflux lora-adapter can do the bridge between both systems. Basically, the service subscribe to the LoRa Gateway Bridge(https://www.loraserver.io/lora-gateway-bridge/overview/), an mqtt broker that receive UDP messages from the SemTech packet-forwarder. You must configure the docker-compose.yml with the address of your LoRa Server Network, otherwise the composition will fail:
+ 
+ ```bash
+ docker-compose -f docker/addons/lora-adapter/docker-compose up
+ 
+ ```
+ 
+ At this point Mainflux and LoRa Server are running. To provision the LoRa Server with Networks, Organizations, Gateways, Applications and Devices
+ you have to implement the gRPC API. Over the LoRa Server UI, which is precisely a good example of the gRPC API implementation, you can do it as well.
+ 
+ #### LoRa Server setup
+ - **Create Organization:** To add your own Gateways to the network you must have an Organization.
+ - **Add Network LoRa Server:** Set the address of your LoRa Server where the [LoRa-Gateways-Bridge](https://www.loraserver.io/lora-gateway-bridge/overview) of brocaar will forward messages over MQTT.
+ - **Create a Gateways-Profile:** In this profile you can select the radio LoRa channels and the LoRa Network Server to use.
+ - **Create a Service-profile:** A service-profile connects an organization to a network-server and defines the features that an organization can use on this Network-Server.
+ - **Create a Gateway:** You must set proper ID in order to be discovered by LoRa Server.
+ - **Create a LoRa Server Application:** You can then create Devices by connecting them to this application. This is equivalent to Devices connected to channels in Mainflux.
+ - **Create a Device-Profile:** Before to create to Device you must create Device profile where you will define some parameter as LoRaWAN MAC version (format of the device address) and the LoRaWAN regional parameter (frequency band). This will allow you to create many devices using this profile.
+ - **Create a Device:** Then you can create a Device. To must configure the `network session key` and `application session key` of your Device. You can generate and copy them on your device configuration or you can use your own pre generated keys and set them from the UI.
+ Device connect through OTAA. Make sure that loraserver device-profile is using same release as device. If MAC version is 1.0.X, `application key = app_key` and `app_eui = deviceEUI`. If MAC version is 1.1 or ABP both parameters will be needed, APP_key and Network key.
+ 
+ #### Connect Mainflux and LoRa Server with lora-adapter
+ 
+ This adapter sits between Mainflux and LoRa Server and forwards the MQTT messages from the [LoRa-Gateways-Bridge](https://www.loraserver.io/lora-gateway-bridge/overview) to the Mainflux multi-protocol message broker, using the adequate MQTT topics and in the good message format (JSON and SenML), i.e. respecting the APIs of both systems.
+ 
+ Once everything is running and the LoRa Server is provisioned, execute the following command from Mainflux project root to run the lora-adapter:
+ 
+ ```bash
+ docker-compose -f docker/addons/lora-adapter/docker-compose.yml up -d
+ 
+ ```
+ 
+ This service uses RedisDB to create a route map between both systems. As in Mainflux we use Channels to connect Things, LoRa Serser uses Applications to connect Devices. Route map create a mapping of applications ID with channels ID and Devices EUI with things ID. The lora-adapter uses the matadata of provision events emitted by mainflux-things service to update the route map. For that, you must provision Mainflux Channels and Things with an extra metadata key in the JSON Body of the HTTP request. It must be a JSON object with keys `type` and `appID` or `devEUI`. In this case `type` must be `lora`, `appID` and `devEUI` must be an existent Lora application ID and device EUI:
+ 
+ **Channel structure:**
+ 
+ ```
+ {
+   "name": "<channel name>",
+   "metadata:":{
+     "type": "lora",
+     "appID": "<application ID>"
+   }
+ }
+ ```
+ 
+ **Thing structure:**
+ 
+ ```
+ {
+   "type": "device",
+   "name": "<thing name>",
+   "metadata:":{
+     "type": "lora",
+     "devEUI": "<device EUI>"
+   }
+ }
+ ```
+ 
+ To receive Lora messages the lora-adapter subscribes to the topic `applications/+/devices/+` of the LoRa Server. The [LoRa-Gateways-Bridge](https://www.loraserver.io/lora-gateway-bridge/overview) uses the same topic to publish decoded messages received from gateways as UDP packets. The lora-adapter verify the applicationID and the deviceEUI of published message and if they are known it forwards the message on the Mainflux NATS broker as corresponding channel and thing.
+ For more information about service capabilities and its usage, please check out the API documentation.
+ 
 ## Add-ons
 
 The `<project_root>/docker` folder contains an `addons` directory. This directory is used for various services that are not core to the Mainflux platform but could be used for providing additional features.
